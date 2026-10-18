@@ -1,0 +1,6 @@
+pytest>=8,<10
+pyyaml>=6,<7
+pyspark>=3.5,<5      # optional: enables tests/test_loader_spark.py
+pyarrow>=14          # optional: used by the Spark tests to write CETAS-like Parquet
+pyodbc>=5.1,<6       # only for tools/generate_inventory.py
+mssql-python==1.15.0  # optional: enables the real-driver error-classification tests

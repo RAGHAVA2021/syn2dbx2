@@ -1,0 +1,20 @@
+{
+  "rules": [
+    {
+      "enabled": true,
+      "name": "bridge-stage-expiry",
+      "type": "Lifecycle",
+      "definition": {
+        "actions": {
+          "baseBlob": {
+            "delete": { "daysAfterModificationGreaterThan": 3 }
+          }
+        },
+        "filters": {
+          "blobTypes": [ "blockBlob" ],
+          "prefixMatch": [ "<container>/bridge-stage/" ]
+        }
+      }
+    }
+  ]
+}

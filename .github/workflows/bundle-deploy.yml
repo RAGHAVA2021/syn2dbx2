@@ -1,0 +1,106 @@
+# Reusable: deploy the Asset Bundle to ONE environment (dev or prod).
+# Called by ci-cd.yml. Authenticates with GitHub OIDC -> Azure (no stored secret),
+# then the Databricks CLI uses the Azure CLI token (DATABRICKS_AUTH_TYPE=azure-cli).
+#
+# Required per GitHub Environment ("dev", "prod"), as Environment *variables*:
+#   AZURE_CLIENT_ID          app/client id of the deploying identity (federated credential for this repo + environment)
+#   AZURE_TENANT_ID          Entra tenant id
+#   AZURE_SUBSCRIPTION_ID    optional; leave unset if the identity has no subscription role
+#   DATABRICKS_JOB_IDENTITY  application id of the service principal the jobs run as
+#   NOTIFICATION_EMAIL       Databricks job failure email
+#   OPERATIONS_GROUP         group allowed to rerun the nightly job
+#   ROLLBACK_APPROVERS_GROUP separate group allowed to run the rollback job
+# Optional:
+#   EXPORT_CONCURRENCY       default 4
+#   NIGHTLY_PAUSE_STATUS     PAUSED (default) or UNPAUSED; set UNPAUSED on "prod" only at go-live
+#   MAINTENANCE_PAUSE_STATUS PAUSED (default) or UNPAUSED
+#
+# If your existing workflows use Databricks-native GitHub OIDC instead of Azure login,
+# replace the "Azure login" step with your usual one and set DATABRICKS_AUTH_TYPE to match.
+name: bundle-deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev or prod (also the bundle target and the GitHub Environment name)
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}   # prod: configure required reviewers in GitHub
+    concurrency:
+      group: databricks-bundle-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      BUNDLE_VAR_job_identity: ${{ vars.DATABRICKS_JOB_IDENTITY }}
+      BUNDLE_VAR_notification_email: ${{ vars.NOTIFICATION_EMAIL }}
+      BUNDLE_VAR_operations_group: ${{ vars.OPERATIONS_GROUP }}
+      BUNDLE_VAR_rollback_approvers_group: ${{ vars.ROLLBACK_APPROVERS_GROUP }}
+      BUNDLE_VAR_export_concurrency: ${{ vars.EXPORT_CONCURRENCY || '4' }}
+      BUNDLE_VAR_nightly_pause_status: ${{ vars.NIGHTLY_PAUSE_STATUS || 'PAUSED' }}
+      BUNDLE_VAR_maintenance_pause_status: ${{ vars.MAINTENANCE_PAUSE_STATUS || 'PAUSED' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required environment variables
+        run: |
+          missing=""
+          for v in BUNDLE_VAR_job_identity BUNDLE_VAR_notification_email \
+                   BUNDLE_VAR_operations_group BUNDLE_VAR_rollback_approvers_group; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          case "$BUNDLE_VAR_nightly_pause_status$BUNDLE_VAR_maintenance_pause_status" in
+            PAUSEDPAUSED|PAUSEDUNPAUSED|UNPAUSEDPAUSED|UNPAUSEDUNPAUSED) ;;
+            *) echo "::error::*_PAUSE_STATUS must be PAUSED or UNPAUSED"; exit 1 ;;
+          esac
+          if [ -n "$missing" ]; then
+            echo "::error::GitHub Environment '${{ inputs.environment }}' is missing variables for:$missing"
+            exit 1
+          fi
+          echo "nightly schedule: $BUNDLE_VAR_nightly_pause_status, maintenance: $BUNDLE_VAR_maintenance_pause_status"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # same as ci-cd.yml and serverless environment version 3
+
+      - name: Select and validate this environment's inventory
+        run: |
+          pip install --quiet "pyyaml>=6,<7"
+          python tools/prepare_deploy.py --environment "${{ inputs.environment }}"
+
+      - name: Azure login (GitHub OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
+
+      # Pinned to a commit (tag v1.18.0) so a change to the action cannot alter a prod deploy.
+      # To upgrade: pick a release tag, resolve its commit, update both the SHA and this comment.
+      - uses: databricks/setup-cli@6a2e75f1f954d87503702c408deea63216c0799d  # v1.18.0
+
+      - name: Validate bundle
+        run: databricks bundle validate -t "${{ inputs.environment }}"
+
+      - name: Deploy bundle
+        run: databricks bundle deploy -t "${{ inputs.environment }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed to ${{ inputs.environment }}"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Nightly schedule: ${BUNDLE_VAR_nightly_pause_status}"
+            echo "- Maintenance schedule: ${BUNDLE_VAR_maintenance_pause_status}"
+            echo "- Reminder: UC setup SQL and Synapse SQL are NOT applied by this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"

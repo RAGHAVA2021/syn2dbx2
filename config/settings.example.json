@@ -1,0 +1,115 @@
+{
+  "_comments": {
+    "_how_to_use": "JSON has no comments, so they live here; the job ignores this block. Copy this file to config/settings.json, replace every <placeholder>, then run tools/generate_inventory.py. Only names and secret references go here, never passwords. Do not add '_comment' keys inside other sections: table_properties keys become real table properties and manifest.columns rejects unknown keys.",
+    "inventory_version": "Free label for this table list, e.g. wave_001. Change it whenever tables are added or changed; it is recorded with every run.",
+    "source_set_id": "Name of the upstream data set. Part of the write guard on every target table: set once, never change it later.",
+    "synapse.server": "Synapse workspace SQL endpoint, e.g. myws.sql.azuresynapse.net.",
+    "synapse.database": "Dedicated SQL pool name.",
+    "synapse.auth": "How the job logs in to Synapse; reuse the identity of the existing JDBC connection. One of: {\"mode\": \"service_credential\", \"credential_name\": <UC service credential>} (managed identity); {\"mode\": \"client_secret\", \"secret_scope\", \"tenant_id_key\", \"client_id_key\", \"client_secret_key\"} (service principal); {\"mode\": \"sql_password\", \"secret_scope\", \"user_key\", \"password_key\"} (SQL login). The *_key values are key names in the Databricks secret scope, not the secrets.",
+    "synapse.uc_jdbc_connection": "Existing Unity Catalog JDBC connection to the pool (SHOW CONNECTIONS). Used only for the fallback read when CETAS cannot export a table. The package never creates it.",
+    "upstream.completion_source": "Keep 'manifest': the daily row-count CSV plus its marker file is the 'upstream finished' signal. 4A refuses any other value.",
+    "manifest.path_template": "Full abfss:// path of the daily row-count CSV. Must contain exactly one {business_date} (2026-10-12) or {business_date_compact} (20261012), so each day has its own file. Must be in a container other than staging.root, where the job can only read.",
+    "manifest.success_marker": "File name of the marker written last, in the same folder as the CSV, e.g. _SUCCESS or _success_marker.json. Content: {\"business_date\": \"2026-10-12\", \"upstream_run_id\": \"2026-10-12\", \"upstream_sequence\": 2026101200}.",
+    "manifest.delimiter": "CSV delimiter, one character.",
+    "manifest.columns": "Header names in the real CSV, mapped to what the job needs. Change only the right-hand values. upstream_sequence may be absent from the CSV (then yyyymmdd00 is used).",
+    "staging.root": "Container where CETAS writes Parquet and the job reads it back. Must be covered by an existing external location with READ FILES and WRITE FILES for the job.",
+    "staging.prefix": "Folder under staging.root for this job's files. Keep equal to the prefix in infra/adls_lifecycle_policy.json.",
+    "staging.metadata_schema": "Synapse schema holding the temporary CETAS external tables.",
+    "staging.external_data_source": "Existing Synapse external data source pointing at staging.root (SELECT name, location FROM sys.external_data_sources).",
+    "staging.file_format": "Existing Synapse external file format; must be PARQUET.",
+    "control.catalog": "Existing Unity Catalog catalog for the job's own log tables (run_log, table_log, plan). Not your business data.",
+    "control.schema": "Schema for the log tables; created by the rendered uc_setup.sql. The runbook calls catalog.schema <ctl>.",
+    "notifications.summary_webhook": "Where the nightly summary email is sent: secret_scope and url_secret_key name the Databricks secret holding the HTTPS webhook URL (e.g. an Azure Logic App). Never put the URL itself here.",
+    "execution.max_tables_per_batch": "Most tables in one batch. Tables in a batch run one after another.",
+    "execution.max_bytes_per_batch": "Most estimated source bytes in one batch (from --profile).",
+    "execution.export_timeout_seconds": "Longest one table's export may run.",
+    "execution.cutoff_local_time": "Publication deadline for the nightly run, local time. No table is published after it.",
+    "execution.recovery_cutoff_local_time": "Last time a same-day manual rerun may publish. For daytime dev tests set it later in the dev inventory only.",
+    "execution.publish_margin_minutes": "No new export or publish starts within this many minutes of the cutoff.",
+    "execution.cutoff_timezone": "Time zone of the cutoffs and of the business date.",
+    "execution.history_limit": "Delta history entries read when checking a target.",
+    "execution.max_upstream_lag_days": "Deprecated; has no effect.",
+    "execution.upstream_wait_minutes": "How long the plan waits for today's CSV and marker before failing the night.",
+    "execution.jdbc_fallback_enabled": "Allow the UC-JDBC fallback when CETAS fails for a non-data, non-capacity reason.",
+    "execution.jdbc_fetch_size": "Rows per JDBC fetch in the fallback.",
+    "execution.jdbc_num_partitions": "Parallel JDBC reads per fallback table (needs jdbc_partition_column on the mapping). Worst case connections = export_concurrency x this.",
+    "execution.max_jdbc_fallbacks_per_batch": "Most CETAS-error fallbacks allowed in one batch.",
+    "execution.fallback_alert_threshold": "Finalize alerts when CETAS-error fallbacks in a night exceed this.",
+    "execution.additional_access_error_codes": "Extra Synapse error numbers to treat as permission denied. Add only codes seen in a real failure.",
+    "execution.max_failed_table_ratio": "Finalize fails the job when more than this share of planned tables did not refresh. Do not raise without evidence.",
+    "execution.plan_transient_retry_minutes": "How long the plan retries temporary platform errors itself.",
+    "governance.exempt_abac_policies": "Keep empty. Each entry is a reviewed human decision about one ABAC policy; see the runbook, 'Governed targets'.",
+    "table_properties": "Delta properties set on newly created target tables. deletedFileRetentionDuration is the rollback window."
+  },
+  "inventory_version": "wave_001",
+  "source_set_id": "synapse_nightly",
+  "synapse": {
+    "server": "<workspace>.sql.azuresynapse.net",
+    "database": "<dedicated_pool>",
+    "auth": {
+      "mode": "service_credential",
+      "credential_name": "<uc-service-credential-name>"
+    },
+    "uc_jdbc_connection": "<uc-jdbc-connection-name>"
+  },
+  "upstream": {
+    "completion_source": "manifest"
+  },
+  "manifest": {
+    "path_template": "abfss://<upstream-container>@<control-account>.dfs.core.windows.net/upstream-manifests/{business_date}/row_counts.csv",
+    "success_marker": "_SUCCESS",
+    "delimiter": ",",
+    "columns": {
+      "business_date": "business_date",
+      "upstream_run_id": "upstream_run_id",
+      "upstream_sequence": "upstream_sequence",
+      "schema": "schema",
+      "table": "table",
+      "row_count": "row_count"
+    }
+  },
+  "staging": {
+    "root": "abfss://<container>@<account>.dfs.core.windows.net",
+    "prefix": "bridge-stage",
+    "metadata_schema": "bridge_meta",
+    "external_data_source": "bridge_stage",
+    "file_format": "bridge_parquet"
+  },
+  "control": {
+    "catalog": "<catalog>",
+    "schema": "bridge_control"
+  },
+  "notifications": {
+    "summary_webhook": {
+      "secret_scope": "<databricks-secret-scope>",
+      "url_secret_key": "nightly-summary-webhook-url"
+    }
+  },
+  "execution": {
+    "max_tables_per_batch": 20,
+    "max_bytes_per_batch": 50000000000,
+    "export_timeout_seconds": 7200,
+    "cutoff_local_time": "07:00",
+    "recovery_cutoff_local_time": "11:00",
+    "publish_margin_minutes": 5,
+    "cutoff_timezone": "Australia/Sydney",
+    "history_limit": 200,
+    "max_upstream_lag_days": 0,
+    "upstream_wait_minutes": 60,
+    "jdbc_fallback_enabled": true,
+    "jdbc_fetch_size": 10000,
+    "jdbc_num_partitions": 4,
+    "max_jdbc_fallbacks_per_batch": 2,
+    "fallback_alert_threshold": 10,
+    "additional_access_error_codes": [],
+    "max_failed_table_ratio": 0.02,
+    "plan_transient_retry_minutes": 15
+  },
+  "governance": {
+    "exempt_abac_policies": []
+  },
+  "table_properties": {
+    "delta.deletedFileRetentionDuration": "interval 7 days",
+    "delta.logRetentionDuration": "interval 30 days"
+  }
+}

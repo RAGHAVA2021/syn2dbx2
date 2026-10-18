@@ -1,0 +1,3 @@
+business_date,upstream_run_id,schema,table,row_count
+2026-09-25,2026-09-25,dbo,Customer,1204331
+2026-09-25,2026-09-25,dbo,SalesOrder,58412907

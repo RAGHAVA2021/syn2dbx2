@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache/
+.databricks/
+build/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Generated at deploy time by tools/prepare_deploy.py
+config/inventory.json

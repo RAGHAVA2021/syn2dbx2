@@ -1,0 +1,64 @@
+# Test on every pull request; on merge to main deploy to dev, then to prod
+# after approval (required reviewers on the "prod" GitHub Environment).
+# Manual runs can deploy one chosen environment, e.g. to redeploy prod only.
+name: ci-cd
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        required: true
+        type: choice
+        options: [dev, prod]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # serverless environment version 3
+      # Java lets the local Spark and Derby JDBC tests run instead of being skipped.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install test dependencies
+        # pyodbc is only needed by tools/generate_inventory.py against a live pool.
+        # mssql-python: the serverless driver; its real exceptions drive the error-classification tests.
+        run: pip install "pytest>=8,<10" "pyyaml>=6,<7" "pyspark>=3.5,<5" "pyarrow>=14" "mssql-python==1.15.0"
+      - name: Run tests
+        run: python -m pytest -q
+
+  deploy-dev:
+    needs: test
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev')
+    uses: ./.github/workflows/bundle-deploy.yml
+    with:
+      environment: dev
+
+  deploy-prod:
+    needs: [test, deploy-dev]
+    # Push to main: only after dev succeeded. Manual prod run: main branch only; dev is skipped.
+    if: >-
+      always() && needs.test.result == 'success' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deploy-dev.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && github.ref == 'refs/heads/main'))
+    uses: ./.github/workflows/bundle-deploy.yml
+    with:
+      environment: prod

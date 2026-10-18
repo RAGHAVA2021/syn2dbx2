@@ -1,0 +1,218 @@
+{
+  "inventory_version": "wave_001",
+  "source_set_id": "synapse_nightly",
+  "synapse": {
+    "server": "contoso-syn.sql.azuresynapse.net",
+    "database": "dwh_pool",
+    "auth": {
+      "mode": "service_credential",
+      "credential_name": "synapse-export"
+    },
+    "uc_jdbc_connection": "synapse_uc_jdbc"
+  },
+  "upstream": {
+    "completion_source": "manifest"
+  },
+  "manifest": {
+    "path_template": "abfss://upstream@contosocontrol.dfs.core.windows.net/upstream-manifests/{business_date}/row_counts.csv",
+    "success_marker": "_SUCCESS",
+    "delimiter": ",",
+    "columns": {
+      "business_date": "business_date",
+      "upstream_run_id": "upstream_run_id",
+      "upstream_sequence": "upstream_sequence",
+      "schema": "schema",
+      "table": "table",
+      "row_count": "row_count"
+    }
+  },
+  "staging": {
+    "root": "abfss://staging@contosostage.dfs.core.windows.net",
+    "prefix": "bridge-stage",
+    "metadata_schema": "bridge_meta",
+    "external_data_source": "bridge_stage",
+    "file_format": "bridge_parquet"
+  },
+  "control": {
+    "catalog": "analytics",
+    "schema": "bridge_control"
+  },
+  "notifications": {
+    "summary_webhook": {
+      "secret_scope": "bridge-notifications",
+      "url_secret_key": "nightly-summary-webhook-url"
+    }
+  },
+  "execution": {
+    "max_tables_per_batch": 20,
+    "max_bytes_per_batch": 50000000000,
+    "export_timeout_seconds": 7200,
+    "cutoff_local_time": "07:00",
+    "cutoff_timezone": "Australia/Sydney",
+    "history_limit": 200,
+    "max_upstream_lag_days": 0,
+    "upstream_wait_minutes": 60,
+    "jdbc_fallback_enabled": true,
+    "jdbc_fetch_size": 10000,
+    "jdbc_num_partitions": 4,
+    "max_jdbc_fallbacks_per_batch": 2,
+    "fallback_alert_threshold": 10,
+    "additional_access_error_codes": [],
+    "max_failed_table_ratio": 0.02,
+    "plan_transient_retry_minutes": 15
+  },
+  "governance": {
+    "exempt_abac_policies": []
+  },
+  "table_properties": {
+    "delta.deletedFileRetentionDuration": "interval 7 days",
+    "delta.logRetentionDuration": "interval 30 days"
+  },
+  "mappings": [
+    {
+      "mapping_id": "dbo__Customer",
+      "enabled": true,
+      "source_schema": "dbo",
+      "source_object": "Customer",
+      "target_catalog": "analytics",
+      "target_schema": "gold",
+      "target_table": "customer",
+      "mandatory": true,
+      "allow_empty": false,
+      "verify_source_count": true,
+      "estimated_bytes": 2000000000,
+      "source_schema_hash": "sha256:f81484b3571cdefa4387422a14f829116adb6cb1c15dcee9bfae3bb635907ed1",
+      "columns": [
+        {
+          "name": "customer_id",
+          "sql_type": "bigint",
+          "max_length": 8,
+          "precision": 19,
+          "scale": 0,
+          "nullable": false
+        },
+        {
+          "name": "customer_name",
+          "sql_type": "nvarchar",
+          "max_length": 400,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true
+        },
+        {
+          "name": "segment_code",
+          "sql_type": "char",
+          "max_length": 4,
+          "precision": 0,
+          "scale": 0,
+          "nullable": true
+        },
+        {
+          "name": "is_active",
+          "sql_type": "bit",
+          "max_length": 1,
+          "precision": 1,
+          "scale": 0,
+          "nullable": false
+        },
+        {
+          "name": "credit_limit",
+          "sql_type": "money",
+          "max_length": 8,
+          "precision": 19,
+          "scale": 4,
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "sql_type": "datetime2",
+          "max_length": 8,
+          "precision": 27,
+          "scale": 7,
+          "nullable": false
+        },
+        {
+          "name": "region_id",
+          "sql_type": "smallint",
+          "max_length": 2,
+          "precision": 5,
+          "scale": 0,
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "mapping_id": "dbo__SalesOrder",
+      "enabled": true,
+      "source_schema": "dbo",
+      "source_object": "SalesOrder",
+      "target_catalog": "analytics",
+      "target_schema": "gold",
+      "target_table": "salesorder",
+      "mandatory": false,
+      "allow_empty": false,
+      "verify_source_count": true,
+      "estimated_bytes": 40000000000,
+      "source_schema_hash": "sha256:da2a78638138e6c36514ff90930e7e930e52e38ea0e41c96b51145db52968d08",
+      "columns": [
+        {
+          "name": "order_id",
+          "sql_type": "bigint",
+          "max_length": 8,
+          "precision": 19,
+          "scale": 0,
+          "nullable": false
+        },
+        {
+          "name": "customer_id",
+          "sql_type": "bigint",
+          "max_length": 8,
+          "precision": 19,
+          "scale": 0,
+          "nullable": false
+        },
+        {
+          "name": "order_date",
+          "sql_type": "date",
+          "max_length": 3,
+          "precision": 10,
+          "scale": 0,
+          "nullable": false
+        },
+        {
+          "name": "amount",
+          "sql_type": "decimal",
+          "max_length": 9,
+          "precision": 18,
+          "scale": 2,
+          "nullable": false
+        },
+        {
+          "name": "status",
+          "sql_type": "varchar",
+          "max_length": 20,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "datetimeoffset",
+          "max_length": 10,
+          "precision": 34,
+          "scale": 7,
+          "nullable": true
+        },
+        {
+          "name": "row_guid",
+          "sql_type": "uniqueidentifier",
+          "max_length": 16,
+          "precision": 0,
+          "scale": 0,
+          "nullable": false
+        }
+      ],
+      "jdbc_partition_column": "order_date"
+    }
+  ]
+}

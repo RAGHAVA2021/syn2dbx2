@@ -1,0 +1,263 @@
+# 4A: serverless CETAS command/control + serverless Unity Catalog JDBC fallback + serverless Delta publish.
+bundle:
+  name: synapse_databricks_serverless_cetas_serverless_jdbc
+run_as:
+  service_principal_name: ${var.job_identity}
+sync:
+  exclude:
+  - tests/**
+  - tools/**
+  - docs/**
+  - infra/**
+  - sql/**
+  - build/**
+  - .github/**
+  - config/inventory.*.json
+variables:
+  job_identity:
+    description: Application (client) id of the service principal the jobs run as.
+  notification_email:
+    description: Address that receives failure notifications.
+  operations_group:
+    description: Group allowed to rerun the nightly job (members can override business_date).
+  rollback_approvers_group:
+    description: Separate group allowed to run the privileged rollback job.
+  export_concurrency:
+    description: Tables exported at the same time (= concurrent CETAS on the pool).
+    default: 4
+  spark_version:
+    default: 18.x-scala2.13
+  node_type:
+    default: Standard_E8ds_v5
+  nightly_pause_status:
+    description: PAUSED or UNPAUSED. Keep PAUSED until go-live is approved; development mode always pauses.
+    default: PAUSED
+  maintenance_pause_status:
+    description: PAUSED or UNPAUSED for the weekly maintenance job.
+    default: PAUSED
+  duration_warning_seconds:
+    description: Warn when the nightly run is still going after this long (before the cutoff bites).
+    default: 14400
+resources:
+  jobs:
+    nightly_full_refresh:
+      name: synapse-full-refresh-serverless-cetas-serverless-jdbc
+      permissions:
+      - group_name: ${var.operations_group}
+        level: CAN_MANAGE_RUN
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      timeout_seconds: 43200
+      schedule:
+        quartz_cron_expression: 0 30 1 * * ?
+        timezone_id: Australia/Sydney
+        pause_status: ${var.nightly_pause_status}
+      email_notifications:
+        on_failure:
+        - ${var.notification_email}
+        on_duration_warning_threshold_exceeded:
+        - ${var.notification_email}
+      health:
+        rules:
+        - metric: RUN_DURATION_SECONDS
+          op: GREATER_THAN
+          value: ${var.duration_warning_seconds}
+      tags:
+        system: synapse-full-refresh
+        version: 2.6.9
+        compute_design: serverless-cetas-serverless-jdbc-fallback
+      parameters:
+      - name: business_date
+        default: ''
+      - name: only_mappings
+        default: ''
+      - name: fail_on_any_failure
+        default: 'false'
+      tasks:
+      - task_key: plan
+        max_retries: 0
+        min_retry_interval_millis: 120000
+        notebook_task:
+          notebook_path: ./src/notebooks/00_plan.py
+          base_parameters:
+            job_run_id: '{{job.run_id}}'
+        environment_key: serverless_sql
+      - task_key: process
+        depends_on:
+        - task_key: plan
+        for_each_task:
+          inputs: '{{tasks.plan.values.batch_ids}}'
+          concurrency: ${var.export_concurrency}
+          task:
+            task_key: extract_validate_batch
+            max_retries: 1
+            min_retry_interval_millis: 120000
+            notebook_task:
+              notebook_path: ./src/notebooks/10_extract_validate_batch.py
+              base_parameters:
+                job_run_id: '{{job.run_id}}'
+                repair_count: '{{job.repair_count}}'
+                batch_id: '{{input}}'
+            environment_key: serverless_sql
+        run_if: ALL_SUCCESS
+      - task_key: serverless_jdbc_fallback
+        depends_on:
+        - task_key: process
+        for_each_task:
+          inputs: '{{tasks.plan.values.batch_ids}}'
+          concurrency: ${var.export_concurrency}
+          task:
+            task_key: serverless_jdbc_fallback_batch
+            max_retries: 1
+            min_retry_interval_millis: 120000
+            notebook_task:
+              notebook_path: ./src/notebooks/20_serverless_jdbc_fallback.py
+              base_parameters:
+                job_run_id: '{{job.run_id}}'
+                batch_id: '{{input}}'
+            environment_key: serverless_sql
+        run_if: ALL_DONE
+      - task_key: publish
+        depends_on:
+        - task_key: serverless_jdbc_fallback
+        for_each_task:
+          inputs: '{{tasks.plan.values.batch_ids}}'
+          concurrency: ${var.export_concurrency}
+          task:
+            task_key: publish_batch
+            max_retries: 1
+            min_retry_interval_millis: 120000
+            notebook_task:
+              notebook_path: ./src/notebooks/30_publish_batch.py
+              base_parameters:
+                job_run_id: '{{job.run_id}}'
+                repair_count: '{{job.repair_count}}'
+                batch_id: '{{input}}'
+            environment_key: serverless_sql
+        run_if: ALL_DONE
+      - task_key: finalize
+        depends_on:
+        - task_key: publish
+        run_if: ALL_DONE
+        max_retries: 0
+        notebook_task:
+          notebook_path: ./src/notebooks/90_finalize.py
+          base_parameters:
+            job_run_id: '{{job.run_id}}'
+            repair_count: '{{job.repair_count}}'
+        environment_key: serverless_sql
+      environments:
+      - environment_key: serverless_sql
+        spec:
+          environment_version: '3'
+          dependencies:
+          - mssql-python==1.15.0
+          - azure-identity>=1.20.0,<2
+    maintenance:
+      name: synapse-full-refresh-maintenance
+      permissions:
+      - group_name: ${var.operations_group}
+        level: CAN_VIEW
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: 0 0 14 ? * SUN
+        timezone_id: Australia/Sydney
+        pause_status: ${var.maintenance_pause_status}
+      email_notifications:
+        on_failure:
+        - ${var.notification_email}
+      parameters:
+      - name: vacuum
+        default: 'false'
+      - name: control_retention_days
+        default: '400'
+      - name: drop_orphan_external_tables
+        default: 'true'
+      - name: optimize_control
+        default: 'true'
+      job_clusters:
+      - job_cluster_key: small
+        new_cluster:
+          spark_version: ${var.spark_version}
+          node_type_id: ${var.node_type}
+          num_workers: 2
+          data_security_mode: SINGLE_USER
+          single_user_name: ${var.job_identity}
+      tasks:
+      - task_key: maintenance
+        job_cluster_key: small
+        notebook_task:
+          notebook_path: ./src/notebooks/maintenance.py
+    rollback:
+      name: synapse-full-refresh-rollback
+      permissions:
+      - group_name: ${var.rollback_approvers_group}
+        level: CAN_MANAGE_RUN
+      max_concurrent_runs: 1
+      parameters:
+      - name: mapping_id
+        default: ''
+      - name: to_business_date
+        default: ''
+      - name: to_version
+        default: ''
+      - name: expected_current_version
+        default: ''
+      - name: reason
+        default: ''
+      - name: dry_run
+        default: 'true'
+      job_clusters:
+      - job_cluster_key: small
+        new_cluster:
+          spark_version: ${var.spark_version}
+          node_type_id: ${var.node_type}
+          num_workers: 1
+          data_security_mode: SINGLE_USER
+          single_user_name: ${var.job_identity}
+          spark_conf:
+            spark.sql.session.timeZone: UTC
+      tasks:
+      - task_key: rollback
+        job_cluster_key: small
+        notebook_task:
+          notebook_path: ./src/notebooks/rollback.py
+    acceptance:
+      name: synapse-full-refresh-acceptance
+      permissions:
+      - group_name: ${var.rollback_approvers_group}
+        level: CAN_MANAGE_RUN
+      max_concurrent_runs: 1
+      parameters:
+      - name: scratch_schema
+        default: ''
+      - name: grant_principal
+        default: ''
+      # Serverless, like the nightly job: the acceptance checks must prove the
+      # Spark confs, idempotent writes and governance preflight on that compute.
+      tasks:
+      - task_key: acceptance
+        notebook_task:
+          notebook_path: ./src/notebooks/acceptance_checks.py
+        environment_key: serverless_sql
+      environments:
+      - environment_key: serverless_sql
+        spec:
+          environment_version: '3'
+          dependencies:
+          - mssql-python==1.15.0
+          - azure-identity>=1.20.0,<2
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://<dev-workspace>.azuredatabricks.net
+  prod:
+    mode: production
+    workspace:
+      host: https://<prod-workspace>.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.job_identity}
