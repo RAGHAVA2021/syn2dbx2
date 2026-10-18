@@ -1,5 +1,18 @@
 # Changelog — 4A — serverless CETAS + serverless JDBC fallback
 
+## 2.6.9 (documentation addendum)
+## 2026-10-18 examples, settings comments and installation guides
+
+No code change.
+
+- `config/row_counts.example.csv` and `config/success_marker.example.json` now show the
+  once-a-day layout: no `upstream_sequence` column, `upstream_run_id` equal to the business date.
+  The marker still carries `upstream_sequence` (`yyyymmdd00`); the code requires it.
+- `docs/UPSTREAM_MANIFEST_SPEC.md` matches that layout and marks `upstream_sequence` optional.
+- `config/settings.example.json` has a `_comments` block explaining every setting; the job ignores it.
+- New `docs/FIRST_RUN.md` (complete installation and first-run steps) and
+  `docs/SETUP_CHECKLIST.md` (tick-list and script map).
+
 ## 2.6.9
 ## 2026-10-12 fresh-install cleanup: one fallback route, manifest-only completion
 

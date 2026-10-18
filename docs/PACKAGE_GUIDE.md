@@ -119,7 +119,7 @@ environment), *Night 1–5* (every automatic nightly run), and *Recovery*.
 
 | File | Purpose and main input → output | Who | When | Order |
 |---|---|---|---|---|
-| `settings.example.json` | Copy to `settings.json`; supply Synapse, manifest, staging, control, execution, governance and summary-webhook secret settings → input to inventory generation. | Platform engineer | Once per environment; again when settings change | Setup 3 |
+| `settings.example.json` | Copy to `settings.json`; supply Synapse, manifest, staging, control, execution, governance and summary-webhook secret settings → input to inventory generation. Every setting is explained in its `_comments` block (ignored by the job). | Platform engineer | Once per environment; again when settings change | Setup 3 |
 | `inventory.example.json` | Two-table example of the complete validated inventory, including mapping schemas and notification settings → reference for the deployed `inventory.json`. | Platform engineer | When reviewing a generated inventory | Setup 4 |
 | `row_counts.example.csv` | Example upstream row-count manifest fields → reference for the upstream pipeline's daily CSV. | Upstream team | When building the manifest output | Setup 2 |
 | `success_marker.example.json` | Example `_SUCCESS` marker that certifies `row_counts.example.csv` → reference for the upstream pipeline's marker. | Upstream team | When building the manifest output | Setup 2 |
@@ -196,6 +196,8 @@ notebook's time and order above), by `tools/` and by `tests/`. See
 |---|---|---|---|
 | `docs/PACKAGE_GUIDE.md` | This inventory and execution map. | Everyone | First, after `README.md` |
 | `docs/DESIGN.md` | Architecture, table flow, safety and retry decisions. | Architect, developer, go-live approver | Before setup; before design changes |
+| `docs/FIRST_RUN.md` | Complete step-by-step installation and first run: names to collect, Synapse and storage, secrets, settings, inventory, Unity Catalog, deploy, acceptance test, first load, prod go-live, and what to do when a step fails. | Platform engineer | To install; first |
+| `docs/SETUP_CHECKLIST.md` | Tick-list version of the same path, with a map of every script (who runs it, where, how often) and the daily routine. | Platform engineer | Alongside `FIRST_RUN.md` |
 | `docs/RUNBOOK.md` | Exact setup, deployment, daily monitoring, recovery and rollback instructions. | Platform engineer, operator | Setup 1–6; every morning; incidents |
 | `docs/RELEASE_VALIDATION.md` | Go-live acceptance checklist and environment-specific checks. | Platform engineer, go-live approver | After deploy to dev and prod, before unpausing |
 | `docs/UPSTREAM_MANIFEST_SPEC.md` | File contract for the nightly row-count CSV and `_SUCCESS` marker: location, columns, business date, timing, corrections. | Upstream team (send with the two `config/` examples) | Before building the upstream output (Setup 2); when it changes |
@@ -312,19 +314,20 @@ Overall order, from first contact to daily operation:
 | 3 | `docs/DESIGN.md` | How it works and why; sections 1–4 are essential, 5–9 are reference. |
 | 4 | `AGENTS.md` | The rules that must not be broken; required before changing anything. |
 | 5 | `docs/UPSTREAM_MANIFEST_SPEC.md` | Send to the upstream team early: they have the longest lead time. |
-| 6 | `infra/README.md` | Storage lifecycle and identity/access to check before setup. |
-| 7 | `docs/RUNBOOK.md` | Do the installation: "Fresh installation with GitHub", then "One-time setup". |
-| 8 | `docs/RELEASE_VALIDATION.md` | Prove dev, then prod, before unpausing the schedule. |
-| 9 | `docs/DATA_DICTIONARY.md` | Control-table columns for the daily checks and investigations. |
-| 10 | `docs/CODE_STRUCTURE.md` | Only when changing code. |
-| 11 | `CHANGELOG.md` | Only when taking a new package version. |
+| 6 | `docs/FIRST_RUN.md` | Do the installation and first run, every step in order. `docs/SETUP_CHECKLIST.md` is the shorter tick-list. |
+| 7 | `infra/README.md` | Storage lifecycle and identity/access to check before setup. |
+| 8 | `docs/RUNBOOK.md` | Reference for deployment (including GitHub Actions), daily checks, recovery and rollback. |
+| 9 | `docs/RELEASE_VALIDATION.md` | Prove dev, then prod, before unpausing the schedule. |
+| 10 | `docs/DATA_DICTIONARY.md` | Control-table columns for the daily checks and investigations. |
+| 11 | `docs/CODE_STRUCTURE.md` | Only when changing code. |
+| 12 | `CHANGELOG.md` | Only when taking a new package version. |
 
 By role:
 
 | Reader | Read |
 |---|---|
 | New to the package | `README.md` → this guide → `DESIGN.md` sections 1–2 |
-| Platform engineer (installing) | `README.md` → this guide → `DESIGN.md` → `AGENTS.md` sections 2–3 → `infra/README.md` → `RUNBOOK.md` → `RELEASE_VALIDATION.md` |
+| Platform engineer (installing) | `README.md` → this guide → `DESIGN.md` → `AGENTS.md` sections 2–3 → `FIRST_RUN.md` (or `SETUP_CHECKLIST.md`) → `infra/README.md` → `RUNBOOK.md` → `RELEASE_VALIDATION.md` |
 | Upstream team | `docs/UPSTREAM_MANIFEST_SPEC.md` with `config/row_counts.example.csv` and `config/success_marker.example.json` |
 | Synapse / storage / UC admin | `infra/README.md` → `RUNBOOK.md` "One-time setup" steps 1, 2 and 5 → `AGENTS.md` section 2 |
 | Operator | This guide section 3 → `RUNBOOK.md` → `DATA_DICTIONARY.md` |
